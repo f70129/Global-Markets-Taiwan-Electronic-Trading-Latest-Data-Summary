@@ -102,6 +102,72 @@ st.markdown("""
 .section-card.forex { border-color: #9C27B0; border-top: 4px solid #9C27B0; }
 .section-card.bonds { border-color: #607D8B; border-top: 4px solid #607D8B; }
 .section-card.summary { border-color: #795548; border-top: 4px solid #795548; }
+.section-card.fear-greed { border-color: #FF5722; border-top: 4px solid #FF5722; }
+
+/* ── 恐懼貪婪儀表 ── */
+.fg-gauge-wrap {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 40px;
+    padding: 8px 0;
+}
+.fg-meter {
+    position: relative;
+    width: 200px;
+    height: 110px;
+    overflow: hidden;
+}
+.fg-score {
+    font-size: 48px;
+    font-weight: 900;
+    text-align: center;
+    line-height: 1;
+}
+.fg-label {
+    font-size: 18px;
+    font-weight: 800;
+    text-align: center;
+    margin-top: 4px;
+}
+.fg-scale {
+    display: flex;
+    justify-content: space-between;
+    font-size: 11px;
+    color: #999;
+    margin-top: 8px;
+    padding: 0 4px;
+}
+.fg-bar-bg {
+    height: 16px;
+    border-radius: 8px;
+    background: linear-gradient(90deg, #D32F2F 0%, #FF9800 25%, #FDD835 50%, #8BC34A 75%, #2E7D32 100%);
+    position: relative;
+    margin-top: 8px;
+}
+.fg-bar-needle {
+    position: absolute;
+    top: -4px;
+    width: 4px;
+    height: 24px;
+    background: #333;
+    border-radius: 2px;
+    transform: translateX(-50%);
+    box-shadow: 0 0 4px rgba(0,0,0,0.3);
+}
+.fg-sub-scores {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 6px;
+    font-size: 12px;
+}
+.fg-sub-item {
+    display: flex;
+    justify-content: space-between;
+    padding: 4px 8px;
+    background: #fafafa;
+    border-radius: 6px;
+}
 
 /* ── 區塊標題 ── */
 .section-title {
@@ -120,6 +186,7 @@ st.markdown("""
 .section-title.forex { color: #6A1B9A; }
 .section-title.bonds { color: #37474F; }
 .section-title.summary { color: #4E342E; }
+.section-title.fear-greed { color: #BF360C; }
 
 /* ── 數據表格 ── */
 .data-table {
@@ -378,7 +445,7 @@ def fetch_all_data():
         except Exception:
             pass
 
-    # ── 5. 匯率 ──
+    # ── 6. 匯率 ──
     fx_tickers = {
         "USDTWD=X": ("美元/台幣", "💱"),
         "DX-Y.NYB": ("美元指數 DXY", "💵"),
@@ -407,7 +474,7 @@ def fetch_all_data():
         except Exception:
             pass
 
-    # ── 6. 美國公債殖利率 ──
+    # ── 7. 美國公債殖利率 ──
     bond_tickers = {
         "^TNX": ("10年期公債殖利率", "📜"),
         "^TYX": ("30年期公債殖利率", "📜"),
@@ -430,6 +497,39 @@ def fetch_all_data():
                     "yield_pct": c, "chg": chg,
                     "chg_pct": ((c-p)/p)*100 if p != 0 else 0,
                     "direction": direction,
+                }
+        except Exception:
+            pass
+
+    # ── 7. CNN 恐懼與貪婪指數 ──
+    data["fear_greed"] = {}
+    try:
+        import fear_and_greed
+        fg = fear_and_greed.get()
+        data["fear_greed"] = {
+            "value": round(fg.value),
+            "description": fg.description,
+            "last_update": fg.last_update.strftime("%Y/%m/%d %H:%M") if fg.last_update else "",
+        }
+    except Exception:
+        # Fallback: 用 VIX 粗估
+        try:
+            vix_df = yf.download("^VIX", period="5d", interval="1d", progress=False)
+            if isinstance(vix_df.columns, pd.MultiIndex):
+                vix_df.columns = vix_df.columns.get_level_values(0)
+            if not vix_df.empty:
+                vix_val = float(vix_df["Close"].iloc[-1])
+                # VIX 粗估映射: VIX < 12 = Extreme Greed, > 30 = Extreme Fear
+                score = max(0, min(100, int(100 - (vix_val - 12) * (100/28))))
+                if score >= 75: desc = "Extreme Greed"
+                elif score >= 55: desc = "Greed"
+                elif score >= 45: desc = "Neutral"
+                elif score >= 25: desc = "Fear"
+                else: desc = "Extreme Fear"
+                data["fear_greed"] = {
+                    "value": score,
+                    "description": desc,
+                    "last_update": f"VIX 推估 ({vix_val:.1f})",
                 }
         except Exception:
             pass
@@ -658,13 +758,99 @@ with col4:
     st.markdown('</div>', unsafe_allow_html=True)
 
 # ════════════════════════════════════════
+# ROW 2.5: 恐懼與貪婪指數 (全寬)
+# ════════════════════════════════════════
+fg = data.get("fear_greed", {})
+if fg:
+    fg_val = fg.get("value", 50)
+    fg_desc = fg.get("description", "N/A")
+    fg_update = fg.get("last_update", "")
+
+    # 中文翻譯
+    desc_zh_map = {
+        "Extreme Fear": "極度恐懼",
+        "Fear": "恐懼",
+        "Neutral": "中性",
+        "Greed": "貪婪",
+        "Extreme Greed": "極度貪婪",
+    }
+    fg_desc_zh = desc_zh_map.get(fg_desc, fg_desc)
+
+    # 顏色映射
+    if fg_val < 25:
+        fg_color = "#D32F2F"
+        fg_emoji = "😱"
+        fg_bg = "#FFEBEE"
+    elif fg_val < 45:
+        fg_color = "#F57C00"
+        fg_emoji = "😰"
+        fg_bg = "#FFF3E0"
+    elif fg_val < 55:
+        fg_color = "#FBC02D"
+        fg_emoji = "😐"
+        fg_bg = "#FFFDE7"
+    elif fg_val < 75:
+        fg_color = "#689F38"
+        fg_emoji = "😏"
+        fg_bg = "#F1F8E9"
+    else:
+        fg_color = "#2E7D32"
+        fg_emoji = "🤑"
+        fg_bg = "#E8F5E9"
+
+    needle_pos = fg_val  # 0-100 maps to 0%-100%
+
+    st.markdown('<div class="section-card fear-greed">', unsafe_allow_html=True)
+    st.markdown('<div class="section-title fear-greed"><span class="icon">🎭</span>CNN 恐懼與貪婪指數 Fear & Greed Index</div>', unsafe_allow_html=True)
+
+    st.markdown(f"""
+    <div class="fg-gauge-wrap">
+        <div style="text-align:center;">
+            <div class="fg-score" style="color:{fg_color};">{fg_emoji} {fg_val}</div>
+            <div class="fg-label" style="color:{fg_color};">{fg_desc_zh}</div>
+            <div style="font-size:11px; color:#999; margin-top:4px;">{fg_desc}</div>
+        </div>
+        <div style="flex:1; max-width:450px;">
+            <div class="fg-bar-bg">
+                <div class="fg-bar-needle" style="left:{needle_pos}%;"></div>
+            </div>
+            <div class="fg-scale">
+                <span>0 極度恐懼</span>
+                <span>25 恐懼</span>
+                <span>50 中性</span>
+                <span>75 貪婪</span>
+                <span>100 極度貪婪</span>
+            </div>
+            <div style="text-align:center; margin-top:10px; font-size:11px; color:#999;">
+                更新: {fg_update}
+            </div>
+        </div>
+    </div>
+    """, unsafe_allow_html=True)
+
+    # 解讀
+    if fg_val < 25:
+        fg_note = f"☆ 市場極度恐懼（{fg_val}），反向指標暗示可能接近底部，逢低布局機會？"
+    elif fg_val < 45:
+        fg_note = f"☆ 市場偏向恐懼（{fg_val}），投資人保守觀望中，留意反彈契機"
+    elif fg_val < 55:
+        fg_note = f"☆ 市場情緒中性（{fg_val}），多空拉鋸，靜待方向明朗"
+    elif fg_val < 75:
+        fg_note = f"☆ 市場偏向貪婪（{fg_val}），追價風險漸增，獲利了結意識抬頭"
+    else:
+        fg_note = f"☆ 市場極度貪婪（{fg_val}），高點警訊！當心回檔修正風險"
+    st.markdown(f'<div class="note-box orange">{fg_note}</div>', unsafe_allow_html=True)
+
+    st.markdown('</div>', unsafe_allow_html=True)
+
+# ════════════════════════════════════════
 # ROW 3: 匯率 (左) + 美國公債 (右)
 # ════════════════════════════════════════
 col5, col6 = st.columns(2)
 
 with col5:
     st.markdown('<div class="section-card forex">', unsafe_allow_html=True)
-    st.markdown('<div class="section-title forex"><span class="icon">💱</span>5. 匯率</div>', unsafe_allow_html=True)
+    st.markdown('<div class="section-title forex"><span class="icon">💱</span>6. 匯率</div>', unsafe_allow_html=True)
 
     fx_rows = ""
     for tk, d in data.get("forex", {}).items():
@@ -693,7 +879,7 @@ with col5:
 
 with col6:
     st.markdown('<div class="section-card bonds">', unsafe_allow_html=True)
-    st.markdown('<div class="section-title bonds"><span class="icon">📜</span>6. 美國公債殖利率</div>', unsafe_allow_html=True)
+    st.markdown('<div class="section-title bonds"><span class="icon">📜</span>7. 美國公債殖利率</div>', unsafe_allow_html=True)
 
     bond_rows = ""
     for tk, d in data.get("bonds", {}).items():
@@ -766,6 +952,13 @@ with scol1:
     fx_usd = data.get("forex", {}).get("USDTWD=X", {})
     if fx_usd:
         summaries.append(f"美元/台幣 {fx_usd['price']:.2f}，{fx_usd['direction']}")
+
+    # 恐懼貪婪
+    fg_sum = data.get("fear_greed", {})
+    if fg_sum:
+        fg_v = fg_sum.get("value", 0)
+        fg_d = {"Extreme Fear":"極度恐懼","Fear":"恐懼","Neutral":"中性","Greed":"貪婪","Extreme Greed":"極度貪婪"}.get(fg_sum.get("description",""), fg_sum.get("description",""))
+        summaries.append(f"恐懼與貪婪指數 {fg_v}（{fg_d}）")
 
     for s in summaries:
         st.markdown(f'<div class="summary-item"><span class="check">✅</span>{s}</div>', unsafe_allow_html=True)
